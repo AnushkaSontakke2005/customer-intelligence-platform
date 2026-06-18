@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from dashboard.app_utils import SCORES_PATH, ensure_dashboard_outputs
+from app_utils import SCORES_PATH, ensure_dashboard_outputs
 from customer_intelligence.business.revenue_simulator import simulate_retention_impact
 
 

@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from dashboard.app_utils import PERSONAS_PATH, SCORES_PATH, ensure_dashboard_outputs
+from app_utils import PERSONAS_PATH, SCORES_PATH, ensure_dashboard_outputs
 
 st.title("Segmentation and Personas")
 ensure_dashboard_outputs()
