@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+data/raw/*.csv
+!data/raw/ibm_telco_customer_churn.csv
+data/processed/*.csv
+data/processed/*.json
+mlflow/mlruns/
+mlflow/models/*.joblib
+catboost_info/
+.DS_Store
