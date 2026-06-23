@@ -17,11 +17,13 @@ def simulate_retention_impact(
     scored = df.copy()
     if "churn_probability" not in scored:
         scored["churn_probability"] = scored.get("churned", 0)
-    scored["risk_value"] = scored["churn_probability"] * scored["total_revenue_12m"]
+    value_is_margin_adjusted = "predicted_ltv" in scored
+    value_basis = scored["predicted_ltv"] if value_is_margin_adjusted else scored["total_revenue_12m"]
+    scored["risk_value"] = scored["churn_probability"] * value_basis
     n_targeted = max(1, int(len(scored) * target_top_pct))
     targeted = scored.nlargest(n_targeted, "risk_value")
     saved_revenue = float((targeted["risk_value"] * success_rate).sum())
-    gross_profit = saved_revenue * BUSINESS_CONFIG.average_gross_margin
+    gross_profit = saved_revenue if value_is_margin_adjusted else saved_revenue * BUSINESS_CONFIG.average_gross_margin
     campaign_cost = n_targeted * BUSINESS_CONFIG.retention_offer_cost
     return {
         "targeted_customers": n_targeted,

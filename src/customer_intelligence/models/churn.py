@@ -8,11 +8,12 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score, f1_score, roc_auc_score
+from sklearn.metrics import average_precision_score, f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from customer_intelligence.config import BUSINESS_CONFIG
 from customer_intelligence.config import MODEL_CONFIG
 from customer_intelligence.features.build_features import MODEL_FEATURES
 
@@ -36,6 +37,53 @@ TELCO_CATEGORICAL_FEATURES = [
     "payment_method",
 ]
 CATEGORICAL_FEATURES = CATEGORICAL_FEATURES + TELCO_CATEGORICAL_FEATURES
+
+
+def calculate_business_threshold(
+    y_true: pd.Series,
+    y_prob,
+    fp_cost: float = BUSINESS_CONFIG.retention_offer_cost,
+    fn_cost: float = 150.0,
+) -> dict[str, float]:
+    """Find the threshold that minimizes retention campaign business cost.
+
+    False positives waste outreach budget. False negatives miss likely churners
+    and lose expected revenue. This turns model selection from a pure ML metric
+    exercise into a business decision.
+    """
+
+    y_true_array = pd.Series(y_true).to_numpy()
+    precisions, recalls, thresholds = precision_recall_curve(y_true_array, y_prob)
+    if len(thresholds) == 0:
+        thresholds = [0.5]
+
+    rows = []
+    for threshold in thresholds:
+        y_pred = (y_prob >= threshold).astype(int)
+        fp = int(((y_pred == 1) & (y_true_array == 0)).sum())
+        fn = int(((y_pred == 0) & (y_true_array == 1)).sum())
+        cost = fp * fp_cost + fn * fn_cost
+        rows.append((float(threshold), fp, fn, float(cost), y_pred))
+
+    optimal_threshold, fp, fn, min_cost, optimal_pred = min(rows, key=lambda item: item[3])
+    default_pred = (y_prob >= 0.5).astype(int)
+    default_fp = int(((default_pred == 1) & (y_true_array == 0)).sum())
+    default_fn = int(((default_pred == 0) & (y_true_array == 1)).sum())
+    default_cost = float(default_fp * fp_cost + default_fn * fn_cost)
+
+    return {
+        "optimal_threshold": optimal_threshold,
+        "business_cost_at_optimal_threshold": min_cost,
+        "business_cost_at_default_threshold": default_cost,
+        "business_cost_reduction": default_cost - min_cost,
+        "false_positives_at_optimal_threshold": fp,
+        "false_negatives_at_optimal_threshold": fn,
+        "precision_at_optimal_threshold": float(precision_score(y_true_array, optimal_pred, zero_division=0)),
+        "recall_at_optimal_threshold": float(recall_score(y_true_array, optimal_pred, zero_division=0)),
+        "f1_at_optimal_threshold": float(f1_score(y_true_array, optimal_pred, zero_division=0)),
+        "fp_cost": float(fp_cost),
+        "fn_cost": float(fn_cost),
+    }
 
 
 def _optional_classifier(package: str, class_name: str):
@@ -129,12 +177,14 @@ def train_churn_models(df: pd.DataFrame) -> tuple[dict[str, Pipeline], pd.DataFr
         model.fit(X_train, y_train)
         proba = model.predict_proba(X_test)[:, 1]
         pred = (proba >= 0.5).astype(int)
+        threshold_metrics = calculate_business_threshold(y_test, proba)
         rows.append(
             {
                 "model": name,
                 "roc_auc": roc_auc_score(y_test, proba),
                 "average_precision": average_precision_score(y_test, proba),
                 "f1": f1_score(y_test, pred),
+                **threshold_metrics,
             }
         )
         trained[name] = model
@@ -142,11 +192,13 @@ def train_churn_models(df: pd.DataFrame) -> tuple[dict[str, Pipeline], pd.DataFr
     return trained, metrics, str(metrics.iloc[0]["model"])
 
 
-def score_churn(df: pd.DataFrame, model: Pipeline) -> pd.DataFrame:
+def score_churn(df: pd.DataFrame, model: Pipeline, decision_threshold: float = 0.5) -> pd.DataFrame:
     """Append churn probability and risk tier."""
 
     scored = df.copy()
     scored["churn_probability"] = model.predict_proba(scored[MODEL_FEATURES + CATEGORICAL_FEATURES])[:, 1]
+    scored["decision_threshold"] = decision_threshold
+    scored["retention_priority"] = scored["churn_probability"] >= decision_threshold
     scored["risk_tier"] = pd.cut(
         scored["churn_probability"],
         bins=[0, 0.35, 0.65, 1.0],

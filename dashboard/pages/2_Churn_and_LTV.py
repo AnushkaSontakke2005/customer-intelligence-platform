@@ -14,7 +14,10 @@ st.bar_chart(df.groupby("plan_type")["churn_probability"].mean())
 st.subheader("Predicted LTV by Risk Tier")
 st.bar_chart(df.groupby("risk_tier")["predicted_ltv"].mean())
 st.subheader("High-Value Customers at Risk")
+ltv_cutoff = df["predicted_ltv"].quantile(0.8)
 st.dataframe(
-    df[(df["is_high_value"] == 1) & (df["risk_tier"] == "high")].sort_values("predicted_ltv", ascending=False).head(50),
+    df[(df["predicted_ltv"] >= ltv_cutoff) & (df["risk_tier"] == "high")]
+    .sort_values("predicted_ltv", ascending=False)
+    .head(50),
     use_container_width=True,
 )
